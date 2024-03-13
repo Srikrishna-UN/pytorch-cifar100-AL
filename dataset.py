@@ -61,3 +61,46 @@ class CIFAR100Test(Dataset):
             image = self.transform(image)
         return label, image
 
+# class CIFAR10Train(Dataset):
+#     """CIFAR-10 training dataset, derived from torch.utils.data.Dataset"""
+
+#     def __init__(self, path, transform=None):
+#         with open(os.path.join(path, 'train'), 'rb') as cifar10:
+#             self.data = pickle.load(cifar10, encoding='bytes')
+#         self.transform = transform
+
+#     def __len__(self):
+#         return len(self.data['labels'.encode()])
+
+#     def __getitem__(self, index):
+#         label = self.data['labels'.encode()][index]
+#         r = self.data['data'.encode()][index, :1024].reshape(32, 32)
+#         g = self.data['data'.encode()][index, 1024:2048].reshape(32, 32)
+#         b = self.data['data'.encode()][index, 2048:].reshape(32, 32)
+#         image = np.dstack((r, g, b))
+
+#         if self.transform:
+#             image = self.transform(image)
+#         return label, image
+
+# class CIFAR10Test(Dataset):
+#     """CIFAR-10 test dataset, derived from torch.utils.data.Dataset"""
+
+#     def __init__(self, path, transform=None):
+#         with open(os.path.join(path, 'test'), 'rb') as cifar10:
+#             self.data = pickle.load(cifar10, encoding='bytes')
+#         self.transform = transform
+
+#     def __len__(self):
+#         return len(self.data['data'.encode()])
+
+#     def __getitem__(self, index):
+#         label = self.data['labels'.encode()][index]
+#         r = self.data['data'.encode()][index, :1024].reshape(32, 32)
+#         g = self.data['data'.encode()][index, 1024:2048].reshape(32, 32)
+#         b = self.data['data'.encode()][index, 2048:].reshape(32, 32)
+#         image = np.dstack((r, g, b))
+
+#         if self.transform:
+#             image = self.transform(image)
+#         return label, image
