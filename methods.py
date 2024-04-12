@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchvision import datasets, transforms
 import torch.utils.data as data
 import numpy as np
 import time
@@ -10,10 +9,11 @@ from sklearn.cluster import KMeans
 import torch.nn.functional as F
 from sklearn.metrics.pairwise import euclidean_distances
 
-def train_model(model, train_loader, epochs, learning_rate):
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def train_model(model, train_loader,criterion,optimizer,scheduler,epochs):
+    # criterion = nn.CrossEntropyLoss()
+    # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=1e-4)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
 
     for epoch in range(epochs):
         print('Epoch {}/{}'.format(epoch + 1, epochs))
@@ -37,6 +37,7 @@ def train_model(model, train_loader, epochs, learning_rate):
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
 
+        scheduler.step()
         end_time = time.time()
         print('TrainLoss: %.3f | TrainAcc: %.3f%% (%d/%d) | Time Elapsed %.3f sec' % (
             train_loss / (batch_idx + 1), 100. * correct / total, correct, total, end_time - start_time))
@@ -106,6 +107,7 @@ def least_confidence_images(model, test_dataset, k=2500):
     _, indices = torch.topk(confidences, k, largest=False)
     return data.Subset(test_dataset, indices), [labels[i] for i in indices]
 
+
 def high_confidence_images(model, test_dataset, k=2500):
     test_loader = data.DataLoader(test_dataset, batch_size=64, shuffle=False)
     confidences = []
@@ -122,7 +124,8 @@ def high_confidence_images(model, test_dataset, k=2500):
     _, indices = torch.topk(confidences, k, largest=True)
     return data.Subset(test_dataset, indices), [labels[i] for i in indices]
 
-def LC_HC_diverse(embed_model, n=None):
+
+def LC_HC_diverse(embed_model, remainder,n=None):
     least_conf_images, least_conf_labels = least_confidence_images(embed_model, remainder, int(n/2))
     high_conf_images, high_conf_labels = high_confidence_images(embed_model, remainder, k=len(remainder) if 2*n > len(remainder) else 2*n)
     embeddings = extract_embeddings(embed_model, high_conf_images)
@@ -134,7 +137,8 @@ def LC_HC_diverse(embed_model, n=None):
     ds = [data.Subset(high_conf_images, diverse_indices), least_conf_images]
     return data.ConcatDataset(ds)
 
-def HC_diverse(embed_model, n=None):
+
+def HC_diverse(embed_model,remainder, n=None):
     high_conf_images, high_conf_labels = high_confidence_images(embed_model, remainder, k=len(remainder) if 2*n > len(remainder) else 2*n)
     embeddings = extract_embeddings(embed_model, high_conf_images)
     new_embeddings = np.array(embeddings)
@@ -144,7 +148,8 @@ def HC_diverse(embed_model, n=None):
     diverse_indices = get_most_diverse_samples(tsne_results, cluster_centers, n)
     return data.Subset(high_conf_images, diverse_indices)
 
-def LC_diverse(embed_model, n=None):
+
+def LC_diverse(embed_model, remainder, n=None):
     least_conf_images, least_conf_labels = least_confidence_images(embed_model, remainder, k=len(remainder) if 2*n > len(remainder) else 2*n)
     embeddings = extract_embeddings(embed_model, least_conf_images)
     new_embeddings = np.array(embeddings)
@@ -155,17 +160,16 @@ def LC_diverse(embed_model, n=None):
     return data.Subset(least_conf_images, diverse_indices)
 
 
-
-def train_until_empty(model, initial_train_set, remainder_set, test_set, max_iterations=15, batch_size=64, learning_rate=0.01, method=1):
-    exp_acc = []
+def train_until_empty(model, initial_train_set, ini, remainder_set, test_set, max_iterations=15, batch_size=64, learning_rate=0.01, method=1):
+    exp_acc = [ini]
 
     for iteration in range(max_iterations):
         if method == 1:
-            train_data = LC_HC_diverse(model, n=5000)
+            train_data = LC_HC_diverse(model, remainder_set, n=5000)
         elif method == 2:
-            train_data = HC_diverse(model, n=5000)
+            train_data = HC_diverse(model, remainder_set, n=5000)
         elif method == 3:
-            train_data = LC_diverse(model, n=5000)
+            train_data = LC_diverse(model, remainder_set, n=5000)
         else:
             print("Invalid Method")
             return exp_acc
@@ -174,8 +178,23 @@ def train_until_empty(model, initial_train_set, remainder_set, test_set, max_ite
             print("Dataset is empty. Stopping training.")
             break
 
-        new_train_set, remainder_set = torch.utils.data.random_split(remainder_set, [5000, len(remainder_set) - 5000], generator=torch.Generator().manual_seed(42))
-        initial_train_set = data.ConcatDataset([initial_train_set, new_train_set])
+        selected_indices = [remainder_set[i] for i in train_data.indices]
+        remainder_set = list(set(remainder_set) - set(selected_indices))
+
+        initial_train_set = data.ConcatDataset([initial_train_set, train_data])
+
+        print(f"\nTraining iteration {iteration + 1}")
+        print(f"Train Set Size: {len(initial_train_set)}, Remainder Size: {len(remainder_set)}")
+        train_loader = data.DataLoader(initial_train_set, batch_size=batch_size, shuffle=True)
+        train_model(model, train_loader, epochs=50, learning_rate=learning_rate)
+
+        test_loader = data.DataLoader(test_set, batch_size=batch_size)
+        accuracy = test_model(model, test_loader)
+        exp_acc.append(accuracy)
+
+        print(f"Iteration {iteration + 1}: Test Accuracy - {accuracy:.2f}")
+
+        return exp_acc
 
         print(f"\nTraining iteration {iteration + 1}")
         print(f"Train Set Size: {len(initial_train_set)}, Remainder Size: {len(remainder_set)}")
